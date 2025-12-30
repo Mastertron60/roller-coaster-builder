@@ -11,7 +11,7 @@ export function RideCamera() {
   const curveRef = useRef<THREE.CatmullRomCurve3 | null>(null);
   const previousCameraPos = useRef(new THREE.Vector3());
   const previousLookAt = useRef(new THREE.Vector3());
-  const velocityRef = useRef(0.5);
+  const maxHeightReached = useRef(0);
   
   const firstPeakT = useMemo(() => {
     if (trackPoints.length < 2) return 0;
@@ -46,12 +46,12 @@ export function RideCamera() {
   
   useEffect(() => {
     curveRef.current = getTrackCurve(trackPoints, isLooped);
-    velocityRef.current = 0.5;
   }, [trackPoints, isLooped]);
   
   useEffect(() => {
-    if (isRiding) {
-      velocityRef.current = 0.5;
+    if (isRiding && curveRef.current) {
+      const startPoint = curveRef.current.getPoint(0);
+      maxHeightReached.current = startPoint.y;
     }
   }, [isRiding]);
   
@@ -60,27 +60,25 @@ export function RideCamera() {
     
     const curve = curveRef.current;
     const curveLength = curve.getLength();
-    
-    const tangent = curve.getTangent(rideProgress);
-    const slope = tangent.y;
+    const currentPoint = curve.getPoint(rideProgress);
+    const currentHeight = currentPoint.y;
     
     let speed: number;
     
     if (hasChainLift && rideProgress < firstPeakT) {
       const chainSpeed = 0.9 * rideSpeed;
       speed = chainSpeed;
-      velocityRef.current = chainSpeed;
+      maxHeightReached.current = Math.max(maxHeightReached.current, currentHeight);
     } else {
-      const gravity = 15.0;
-      const drag = 0.02;
+      maxHeightReached.current = Math.max(maxHeightReached.current, currentHeight);
       
-      const acceleration = -slope * gravity;
-      velocityRef.current += acceleration * delta;
-      velocityRef.current *= (1 - drag);
-      velocityRef.current = Math.max(0.3, velocityRef.current);
-      velocityRef.current = Math.min(8.0, velocityRef.current);
+      const gravity = 9.8;
+      const heightDrop = maxHeightReached.current - currentHeight;
       
-      speed = velocityRef.current * rideSpeed;
+      const energySpeed = Math.sqrt(2 * gravity * Math.max(0, heightDrop));
+      
+      const minSpeed = 1.0;
+      speed = Math.max(minSpeed, energySpeed) * rideSpeed;
     }
     
     const progressDelta = (speed * delta) / curveLength;
@@ -90,7 +88,8 @@ export function RideCamera() {
       if (isLooped) {
         newProgress = newProgress % 1;
         if (hasChainLift) {
-          velocityRef.current = 0.5;
+          const startPoint = curve.getPoint(0);
+          maxHeightReached.current = startPoint.y;
         }
       } else {
         stopRide();
@@ -106,10 +105,10 @@ export function RideCamera() {
       : Math.min(newProgress + 0.02, 0.999);
     const lookAtPoint = curve.getPoint(lookAheadT);
     
-    const newTangent = curve.getTangent(newProgress);
+    const tangent = curve.getTangent(newProgress);
     const binormal = new THREE.Vector3();
     const normal = new THREE.Vector3(0, 1, 0);
-    binormal.crossVectors(newTangent, normal).normalize();
+    binormal.crossVectors(tangent, normal).normalize();
     
     const cameraHeight = 1.5;
     const cameraOffset = normal.clone().multiplyScalar(cameraHeight);
