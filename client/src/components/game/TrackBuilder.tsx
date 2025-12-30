@@ -1,5 +1,5 @@
-import { useRef, useState } from "react";
-import { ThreeEvent } from "@react-three/fiber";
+import { useRef, useState, useEffect } from "react";
+import { ThreeEvent, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { useRollerCoaster } from "@/lib/stores/useRollerCoaster";
 import { TrackPoint } from "./TrackPoint";
@@ -8,9 +8,45 @@ import { Track } from "./Track";
 export function TrackBuilder() {
   const { trackPoints, addTrackPoint, mode, selectPoint } = useRollerCoaster();
   const planeRef = useRef<THREE.Mesh>(null);
-  const [previewHeight, setPreviewHeight] = useState(5);
+  const { gl } = useThree();
+  
   const [isDraggingNew, setIsDraggingNew] = useState(false);
-  const [dragStartPos, setDragStartPos] = useState<THREE.Vector3 | null>(null);
+  const [dragPosition, setDragPosition] = useState<THREE.Vector3 | null>(null);
+  const currentHeightRef = useRef(3);
+  
+  useEffect(() => {
+    if (!isDraggingNew) return;
+    
+    const handlePointerMove = (e: PointerEvent) => {
+      if (!isDraggingNew || !dragPosition) return;
+      
+      const deltaY = e.movementY * -0.1;
+      const newHeight = Math.max(0.5, Math.min(50, currentHeightRef.current + deltaY));
+      currentHeightRef.current = newHeight;
+      
+      setDragPosition(new THREE.Vector3(dragPosition.x, newHeight, dragPosition.z));
+    };
+    
+    const handlePointerUp = () => {
+      if (isDraggingNew && dragPosition) {
+        const finalPoint = new THREE.Vector3(dragPosition.x, currentHeightRef.current, dragPosition.z);
+        addTrackPoint(finalPoint);
+        console.log("Added track point at:", finalPoint);
+      }
+      
+      setIsDraggingNew(false);
+      setDragPosition(null);
+      currentHeightRef.current = 3;
+    };
+    
+    gl.domElement.addEventListener("pointermove", handlePointerMove);
+    gl.domElement.addEventListener("pointerup", handlePointerUp);
+    
+    return () => {
+      gl.domElement.removeEventListener("pointermove", handlePointerMove);
+      gl.domElement.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, [isDraggingNew, dragPosition, addTrackPoint, gl.domElement]);
   
   const handlePointerDown = (e: ThreeEvent<PointerEvent>) => {
     if (mode !== "build") return;
@@ -18,33 +54,11 @@ export function TrackBuilder() {
     
     selectPoint(null);
     
-    const point = e.point.clone();
-    point.y = previewHeight;
+    currentHeightRef.current = 3;
+    const point = new THREE.Vector3(e.point.x, 3, e.point.z);
     
-    setDragStartPos(point.clone());
+    setDragPosition(point);
     setIsDraggingNew(true);
-  };
-  
-  const handlePointerMove = (e: ThreeEvent<PointerEvent>) => {
-    if (!isDraggingNew || !dragStartPos || mode !== "build") return;
-    
-    const deltaY = (e.point.z - dragStartPos.z) * -0.5;
-    const newHeight = Math.max(1, previewHeight + deltaY);
-    setPreviewHeight(newHeight);
-    dragStartPos.y = newHeight;
-  };
-  
-  const handlePointerUp = (e: ThreeEvent<PointerEvent>) => {
-    if (!isDraggingNew || mode !== "build") return;
-    
-    const point = e.point.clone();
-    point.y = previewHeight;
-    
-    addTrackPoint(point);
-    console.log("Added track point at:", point);
-    
-    setIsDraggingNew(false);
-    setDragStartPos(null);
   };
   
   return (
@@ -54,8 +68,6 @@ export function TrackBuilder() {
         rotation={[-Math.PI / 2, 0, 0]}
         position={[0, 0.01, 0]}
         onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
         visible={false}
       >
         <planeGeometry args={[200, 200]} />
@@ -73,11 +85,17 @@ export function TrackBuilder() {
         />
       ))}
       
-      {isDraggingNew && dragStartPos && (
-        <mesh position={dragStartPos}>
-          <sphereGeometry args={[0.5, 16, 16]} />
-          <meshStandardMaterial color="#00ff00" transparent opacity={0.6} />
-        </mesh>
+      {isDraggingNew && dragPosition && (
+        <group>
+          <mesh position={[dragPosition.x, dragPosition.y, dragPosition.z]}>
+            <sphereGeometry args={[0.5, 16, 16]} />
+            <meshStandardMaterial color="#00ff00" transparent opacity={0.7} />
+          </mesh>
+          <mesh position={[dragPosition.x, dragPosition.y / 2, dragPosition.z]}>
+            <cylinderGeometry args={[0.05, 0.05, dragPosition.y, 8]} />
+            <meshStandardMaterial color="#00ff00" transparent opacity={0.5} />
+          </mesh>
+        </group>
       )}
     </group>
   );

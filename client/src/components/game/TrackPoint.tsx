@@ -16,6 +16,14 @@ export function TrackPoint({ id, position, index }: TrackPointProps) {
   const [hovered, setHovered] = useState(false);
   const { gl } = useThree();
   
+  const currentYRef = useRef(position.y);
+  const positionRef = useRef({ x: position.x, z: position.z });
+  
+  useEffect(() => {
+    currentYRef.current = position.y;
+    positionRef.current = { x: position.x, z: position.z };
+  }, [position.x, position.y, position.z]);
+  
   const isSelected = selectedPointId === id;
   
   useEffect(() => {
@@ -24,10 +32,11 @@ export function TrackPoint({ id, position, index }: TrackPointProps) {
     const handlePointerMove = (e: PointerEvent) => {
       if (!isDragging || mode !== "build") return;
       
-      const deltaY = e.movementY * -0.05;
-      const newY = Math.max(0.5, position.y + deltaY);
+      const deltaY = e.movementY * -0.1;
+      const newY = Math.max(0.5, currentYRef.current + deltaY);
+      currentYRef.current = newY;
       
-      const newPos = new THREE.Vector3(position.x, newY, position.z);
+      const newPos = new THREE.Vector3(positionRef.current.x, newY, positionRef.current.z);
       updateTrackPoint(id, newPos);
     };
     
@@ -42,7 +51,7 @@ export function TrackPoint({ id, position, index }: TrackPointProps) {
       gl.domElement.removeEventListener("pointermove", handlePointerMove);
       gl.domElement.removeEventListener("pointerup", handlePointerUp);
     };
-  }, [isDragging, id, position, updateTrackPoint, mode, gl.domElement]);
+  }, [isDragging, id, updateTrackPoint, mode, gl.domElement]);
   
   const handlePointerDown = (e: ThreeEvent<PointerEvent>) => {
     if (mode !== "build") return;
@@ -69,9 +78,6 @@ export function TrackPoint({ id, position, index }: TrackPointProps) {
           emissiveIntensity={0.3}
         />
       </mesh>
-      <sprite position={[position.x, position.y + 1, position.z]} scale={[0.8, 0.4, 1]}>
-        <spriteMaterial color="white" opacity={0.8} transparent />
-      </sprite>
     </group>
   );
 }
