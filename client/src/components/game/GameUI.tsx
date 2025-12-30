@@ -16,6 +16,8 @@ export function GameUI() {
     setRideSpeed,
     isAddingPoints,
     setIsAddingPoints,
+    isLooped,
+    setIsLooped,
   } = useRollerCoaster();
   
   const canRide = trackPoints.length >= 2;
@@ -44,6 +46,16 @@ export function GameUI() {
                   : "bg-gray-600 hover:bg-gray-700"}
               >
                 {isAddingPoints ? "Adding Points (ON)" : "Adding Points (OFF)"}
+              </Button>
+              
+              <Button
+                onClick={() => setIsLooped(!isLooped)}
+                disabled={trackPoints.length < 3}
+                className={isLooped 
+                  ? "bg-purple-600 hover:bg-purple-700" 
+                  : "bg-gray-600 hover:bg-gray-700"}
+              >
+                {isLooped ? "Loop Track (ON)" : "Loop Track (OFF)"}
               </Button>
               
               <Button

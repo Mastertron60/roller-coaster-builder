@@ -5,7 +5,7 @@ import { useRollerCoaster } from "@/lib/stores/useRollerCoaster";
 import { Line } from "@react-three/drei";
 
 export function Track() {
-  const { trackPoints } = useRollerCoaster();
+  const { trackPoints, isLooped } = useRollerCoaster();
   const tubeRef = useRef<THREE.Mesh>(null);
   
   const { curve, railPoints, supportPositions } = useMemo(() => {
@@ -15,7 +15,7 @@ export function Track() {
     
     const points = trackPoints.map((p) => p.position.clone());
     
-    const curve = new THREE.CatmullRomCurve3(points, false, "catmullrom", 0.5);
+    const curve = new THREE.CatmullRomCurve3(points, isLooped, "catmullrom", 0.5);
     
     const railPoints: THREE.Vector3[] = [];
     const numSamples = Math.max(trackPoints.length * 20, 100);
@@ -37,7 +37,7 @@ export function Track() {
     }
     
     return { curve, railPoints, supportPositions };
-  }, [trackPoints]);
+  }, [trackPoints, isLooped]);
   
   if (!curve || railPoints.length < 2) {
     return null;
@@ -104,8 +104,8 @@ export function Track() {
   );
 }
 
-export function getTrackCurve(trackPoints: { position: THREE.Vector3 }[]) {
+export function getTrackCurve(trackPoints: { position: THREE.Vector3 }[], isLooped: boolean = false) {
   if (trackPoints.length < 2) return null;
   const points = trackPoints.map((p) => p.position.clone());
-  return new THREE.CatmullRomCurve3(points, false, "catmullrom", 0.5);
+  return new THREE.CatmullRomCurve3(points, isLooped, "catmullrom", 0.5);
 }

@@ -6,15 +6,15 @@ import { getTrackCurve } from "./Track";
 
 export function RideCamera() {
   const { camera } = useThree();
-  const { trackPoints, isRiding, rideProgress, setRideProgress, rideSpeed, stopRide } = useRollerCoaster();
+  const { trackPoints, isRiding, rideProgress, setRideProgress, rideSpeed, stopRide, isLooped } = useRollerCoaster();
   
   const curveRef = useRef<THREE.CatmullRomCurve3 | null>(null);
   const previousCameraPos = useRef(new THREE.Vector3());
   const previousLookAt = useRef(new THREE.Vector3());
   
   useEffect(() => {
-    curveRef.current = getTrackCurve(trackPoints);
-  }, [trackPoints]);
+    curveRef.current = getTrackCurve(trackPoints, isLooped);
+  }, [trackPoints, isLooped]);
   
   useFrame((_, delta) => {
     if (!isRiding || !curveRef.current) return;
@@ -41,8 +41,12 @@ export function RideCamera() {
     let newProgress = rideProgress + progressDelta;
     
     if (newProgress >= 1) {
-      stopRide();
-      return;
+      if (isLooped) {
+        newProgress = newProgress % 1;
+      } else {
+        stopRide();
+        return;
+      }
     }
     
     setRideProgress(newProgress);
