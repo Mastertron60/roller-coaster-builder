@@ -112,96 +112,64 @@ export const useRollerCoaster = create<RollerCoasterState>((set, get) => ({
   createLoopAtPoint: (id) => {
     set((state) => {
       const pointIndex = state.trackPoints.findIndex((p) => p.id === id);
-      if (pointIndex === -1) return state;
+      if (pointIndex === -1 || pointIndex >= state.trackPoints.length - 1) return state;
       
-      const basePoint = state.trackPoints[pointIndex];
-      const pos = basePoint.position.clone();
+      const entryPoint = state.trackPoints[pointIndex];
+      const exitPoint = state.trackPoints[pointIndex + 1];
+      const entryPos = entryPoint.position.clone();
+      const exitPos = exitPoint.position.clone();
       
-      // Calculate forward direction (along track, horizontal)
-      let forward = new THREE.Vector3(1, 0, 0);
-      if (pointIndex > 0) {
-        const prevPoint = state.trackPoints[pointIndex - 1];
-        forward = pos.clone().sub(prevPoint.position);
-        forward.y = 0;
-        if (forward.length() < 0.1) {
-          forward = new THREE.Vector3(1, 0, 0);
-        }
-        forward.normalize();
+      // Calculate forward direction from entry to exit
+      const segment = exitPos.clone().sub(entryPos);
+      let forward = segment.clone();
+      forward.y = 0;
+      if (forward.length() < 0.1) {
+        forward = new THREE.Vector3(1, 0, 0);
       }
+      forward.normalize();
       
+      // Loop parameters
       const loopRadius = 8;
-      const leadIn = 3;
-      const leadOut = 3;
-      const totalLoopLength = leadIn + (loopRadius * 2) + leadOut;
+      const arcPoints = 12;
       
-      // STEP 1: Shift all subsequent points forward to make room for the loop
-      const shiftedPoints = state.trackPoints.slice(pointIndex + 1).map(p => ({
-        ...p,
-        position: new THREE.Vector3(
-          p.position.x + forward.x * totalLoopLength,
-          p.position.y,
-          p.position.z + forward.z * totalLoopLength
-        )
-      }));
+      // Loop center is midway between entry and exit, at loopRadius height
+      const midX = (entryPos.x + exitPos.x) / 2;
+      const midZ = (entryPos.z + exitPos.z) / 2;
+      const baseY = Math.min(entryPos.y, exitPos.y);
+      const loopCenterY = baseY + loopRadius;
       
-      // STEP 2: Create vertical loop in the forward-up plane
+      // Generate loop arc points
+      // Start at entry (back of loop), go up, over top (upside down), down to exit (front)
       const loopPoints: TrackPoint[] = [];
       
-      // Lead-in point
-      loopPoints.push({
-        id: `point-${++pointCounter}`,
-        position: new THREE.Vector3(
-          pos.x + forward.x * leadIn,
-          pos.y,
-          pos.z + forward.z * leadIn
-        ),
-        tilt: 0
-      });
-      
-      // Loop center is at leadIn + loopRadius forward, loopRadius up
-      const loopCenterX = pos.x + forward.x * (leadIn + loopRadius);
-      const loopCenterY = pos.y + loopRadius;
-      const loopCenterZ = pos.z + forward.z * (leadIn + loopRadius);
-      
-      // Generate loop points: start at bottom-back, go up-back, over top, down-front, to bottom-front
-      // Angle -PI/2 = bottom-back (entrance), angle 3PI/2 = bottom-front (exit)
-      const arcPoints = 10;
       for (let i = 1; i < arcPoints; i++) {
         const t = i / arcPoints;
+        // Angle goes from -PI/2 (back/entry) through PI/2 (top) to 3PI/2 (front/exit)
         const angle = -Math.PI / 2 + t * Math.PI * 2;
         
-        // sin gives forward offset: -1 at back, +1 at front
-        const forwardOffset = Math.sin(angle) * loopRadius;
-        // cos gives height offset: -1 at bottom, +1 at top
+        // sin: -1 at entry, 0 at sides, +1 at exit
+        const forwardT = (Math.sin(angle) + 1) / 2; // 0 to 1
+        // cos: 0 at entry/exit, 1 at top
         const heightOffset = Math.cos(angle) * loopRadius;
+        
+        // Interpolate X and Z between entry and exit based on forward progress
+        const x = entryPos.x + (exitPos.x - entryPos.x) * forwardT;
+        const z = entryPos.z + (exitPos.z - entryPos.z) * forwardT;
+        const y = loopCenterY + heightOffset;
         
         loopPoints.push({
           id: `point-${++pointCounter}`,
-          position: new THREE.Vector3(
-            loopCenterX + forward.x * forwardOffset,
-            loopCenterY + heightOffset,
-            loopCenterZ + forward.z * forwardOffset
-          ),
+          position: new THREE.Vector3(x, y, z),
           tilt: 0
         });
       }
       
-      // Lead-out point
-      loopPoints.push({
-        id: `point-${++pointCounter}`,
-        position: new THREE.Vector3(
-          pos.x + forward.x * (leadIn + loopRadius * 2 + leadOut),
-          pos.y,
-          pos.z + forward.z * (leadIn + loopRadius * 2 + leadOut)
-        ),
-        tilt: 0
-      });
-      
-      // Combine: original up to selected + loop + shifted remainder
+      // Combine: points before entry + entry + loop arc + exit + points after exit
+      // We keep the entry and exit points, inserting the loop between them
       const newTrackPoints = [
         ...state.trackPoints.slice(0, pointIndex + 1),
         ...loopPoints,
-        ...shiftedPoints
+        ...state.trackPoints.slice(pointIndex + 1)
       ];
       
       return { trackPoints: newTrackPoints };
