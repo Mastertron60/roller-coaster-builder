@@ -148,8 +148,11 @@ export const useRollerCoaster = create<RollerCoasterState>((set, get) => ({
       const up = new THREE.Vector3(0, 1, 0);
       const right = new THREE.Vector3().crossVectors(forward, up).normalize();
       
+      // Get the next legacy point to blend toward
+      const nextLegacyPoint = state.trackPoints[pointIndex + 1];
+      
       // Build helical loop with mild corkscrew
-      // Lateral offset increases linearly throughout to separate entry from exit
+      // Lateral offset increases linearly, but eases back in final quarter to blend toward next point
       for (let i = 1; i <= totalLoopPoints; i++) {
         const t = i / totalLoopPoints; // 0 to 1
         const theta = t * Math.PI * 2; // 0 to 2π
@@ -157,16 +160,52 @@ export const useRollerCoaster = create<RollerCoasterState>((set, get) => ({
         const forwardOffset = Math.sin(theta) * loopRadius;
         const verticalOffset = (1 - Math.cos(theta)) * loopRadius;
         
-        // Gradual corkscrew: linear lateral offset
-        const lateralOffset = t * helixSeparation;
+        // Lateral offset: increases to max at 3/4 point, then eases back toward next point
+        let lateralOffset: number;
+        const blendStart = 0.75; // Start blending at 75% through the loop
+        
+        if (t < blendStart) {
+          // Normal helical offset up to blend point
+          lateralOffset = (t / blendStart) * helixSeparation;
+        } else {
+          // Ease the offset back toward where we need to go
+          const blendT = (t - blendStart) / (1 - blendStart); // 0 to 1 in blend zone
+          const easeT = blendT * blendT * (3 - 2 * blendT); // Smooth step
+          lateralOffset = helixSeparation * (1 - easeT * 0.7); // Keep some offset but reduce
+        }
+        
+        const loopPos = new THREE.Vector3(
+          entryPos.x + forward.x * forwardOffset + right.x * lateralOffset,
+          entryPos.y + verticalOffset,
+          entryPos.z + forward.z * forwardOffset + right.z * lateralOffset
+        );
+        
+        // For the final few points, blend toward the next legacy point direction
+        if (nextLegacyPoint && t > blendStart) {
+          const blendT = (t - blendStart) / (1 - blendStart);
+          const easeT = blendT * blendT * (3 - 2 * blendT);
+          
+          // Compute where the pure loop would exit
+          const pureExitForward = entryPos.clone().add(forward.clone().multiplyScalar(0));
+          pureExitForward.add(right.clone().multiplyScalar(helixSeparation));
+          
+          // Direction toward next point from current loop position
+          const toNext = nextLegacyPoint.position.clone().sub(loopPos);
+          const distToNext = toNext.length();
+          
+          // Subtly pull the position toward a line leading to next point
+          // Only affect the horizontal, keep the vertical from the loop
+          if (distToNext > 0.1) {
+            toNext.normalize();
+            const pullStrength = easeT * 0.3; // Gentle pull
+            loopPos.x += toNext.x * pullStrength * 2;
+            loopPos.z += toNext.z * pullStrength * 2;
+          }
+        }
         
         loopPoints.push({
           id: `point-${++pointCounter}`,
-          position: new THREE.Vector3(
-            entryPos.x + forward.x * forwardOffset + right.x * lateralOffset,
-            entryPos.y + verticalOffset,
-            entryPos.z + forward.z * forwardOffset + right.z * lateralOffset
-          ),
+          position: loopPos,
           tilt: 0,
           loopMeta: {
             entryPos: entryPos.clone(),
