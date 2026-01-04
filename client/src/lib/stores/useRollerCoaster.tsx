@@ -150,21 +150,34 @@ export const useRollerCoaster = create<RollerCoasterState>((set, get) => ({
       const right = new THREE.Vector3().crossVectors(forward, up).normalize();
       
       // === APPROACH POINTS: Smooth entry into the loop ===
-      // Add 2 approach points that curve gently from the previous track into the loop entry
+      // Create an "entry anchor" ahead of entryPos that aligns with the loop's forward direction
       const approachPoints: TrackPoint[] = [];
       const prevPoint = pointIndex > 0 ? state.trackPoints[pointIndex - 1] : null;
+      const prevPrevPoint = pointIndex > 1 ? state.trackPoints[pointIndex - 2] : null;
       
       if (prevPoint) {
         const prevPos = prevPoint.position.clone();
-        const approachDist = loopRadius * 0.5; // Distance for approach curve
+        const approachLength = loopRadius * 0.8; // Length of approach curve
         
-        // Tangent at entry: must be the loop's forward direction
+        // Direction from prevPrev to prev (legacy track direction)
+        let legacyDir: THREE.Vector3;
+        if (prevPrevPoint) {
+          legacyDir = prevPos.clone().sub(prevPrevPoint.position).normalize();
+        } else {
+          legacyDir = entryPos.clone().sub(prevPos).normalize();
+        }
+        legacyDir.y = 0;
+        legacyDir.normalize();
+        
+        // Entry tangent must match loop's forward direction
         const entryTangent = forward.clone();
-        // Tangent from previous: direction we're coming from
-        const incomingDir = entryPos.clone().sub(prevPos).normalize();
         
-        // Hermite interpolation for approach
-        const approachHermite = (t: number): THREE.Vector3 => {
+        // Create an entry anchor point that's slightly before the entry
+        // positioned to smoothly guide into the loop
+        const entryAnchor = entryPos.clone().sub(forward.clone().multiplyScalar(loopRadius * 0.3));
+        
+        // Hermite from prevPos to entryAnchor
+        const hermite = (t: number, p0: THREE.Vector3, t0: THREE.Vector3, p1: THREE.Vector3, t1: THREE.Vector3, scale: number): THREE.Vector3 => {
           const t2 = t * t;
           const t3 = t2 * t;
           
@@ -173,19 +186,27 @@ export const useRollerCoaster = create<RollerCoasterState>((set, get) => ({
           const h01 = -2*t3 + 3*t2;
           const h11 = t3 - t2;
           
-          const tangentScale = approachDist * 0.8;
-          
           return new THREE.Vector3()
-            .addScaledVector(prevPos, h00)
-            .addScaledVector(incomingDir, h10 * tangentScale)
-            .addScaledVector(entryPos, h01)
-            .addScaledVector(entryTangent, h11 * tangentScale);
+            .addScaledVector(p0, h00)
+            .addScaledVector(t0, h10 * scale)
+            .addScaledVector(p1, h01)
+            .addScaledVector(t1, h11 * scale);
         };
         
-        // Add approach point (replaces direct connection to entry)
+        const dist1 = prevPos.distanceTo(entryAnchor);
+        const dist2 = entryAnchor.distanceTo(entryPos);
+        
+        // First segment: prevPos to entryAnchor (align with legacy direction -> forward)
         approachPoints.push({
           id: `point-${++pointCounter}`,
-          position: approachHermite(0.5),
+          position: hermite(0.5, prevPos, legacyDir, entryAnchor, forward, dist1 * 0.5),
+          tilt: 0
+        });
+        
+        // Second segment: entryAnchor to entryPos (both tangents are forward)
+        approachPoints.push({
+          id: `point-${++pointCounter}`,
+          position: hermite(0.5, entryAnchor, forward, entryPos, forward, dist2 * 0.5),
           tilt: 0
         });
       }
@@ -236,23 +257,57 @@ export const useRollerCoaster = create<RollerCoasterState>((set, get) => ({
         .add(forward.clone().multiplyScalar(forwardSeparation))
         .add(right.clone().multiplyScalar(exitSeparation));
       
-      // Hermite-style transition: respect both loop exit direction and legacy track direction
+      // === EXIT TRANSITION: Smooth exit from the loop ===
+      // Use offsetLoopExit as an anchor to create a two-stage smooth exit
       const transitionPoints: TrackPoint[] = [];
       
-      // We need to skip the immediate next point and target the one after to avoid S-curves
+      // We need to skip the immediate next points and target further down the track
       const nextNextPoint = state.trackPoints[pointIndex + 2];
-      const targetPoint = nextNextPoint || nextPoint;
+      const nextNextNextPoint = state.trackPoints[pointIndex + 3];
+      const targetPoint = nextNextNextPoint || nextNextPoint || nextPoint;
+      
+      // Hermite helper
+      const hermite = (t: number, p0: THREE.Vector3, t0: THREE.Vector3, p1: THREE.Vector3, t1: THREE.Vector3, scale: number): THREE.Vector3 => {
+        const t2 = t * t;
+        const t3 = t2 * t;
+        
+        const h00 = 2*t3 - 3*t2 + 1;
+        const h10 = t3 - 2*t2 + t;
+        const h01 = -2*t3 + 3*t2;
+        const h11 = t3 - t2;
+        
+        return new THREE.Vector3()
+          .addScaledVector(p0, h00)
+          .addScaledVector(t0, h10 * scale)
+          .addScaledVector(p1, h01)
+          .addScaledVector(t1, h11 * scale);
+      };
+      
+      // Loop exit tangent: at θ=2π, tangent = forward
+      const exitTangent = forward.clone();
+      
+      // First stage: loopExit to offsetLoopExit (both using forward tangent)
+      const dist1 = loopExit.distanceTo(offsetLoopExit);
+      transitionPoints.push({
+        id: `point-${++pointCounter}`,
+        position: hermite(0.5, loopExit, exitTangent, offsetLoopExit, forward, dist1 * 0.6),
+        tilt: 0
+      });
+      
+      // Add the offset anchor point itself
+      transitionPoints.push({
+        id: `point-${++pointCounter}`,
+        position: offsetLoopExit.clone(),
+        tilt: 0
+      });
       
       if (targetPoint) {
         const targetPos = targetPoint.position.clone();
         
-        // Loop exit tangent: at θ=2π, tangent = forward
-        const exitTangent = forward.clone();
-        
         // Legacy track direction (from target toward the point after it)
-        const pointAfterTarget = nextNextPoint 
-          ? state.trackPoints[pointIndex + 3]
-          : state.trackPoints[pointIndex + 2];
+        const pointAfterTarget = nextNextNextPoint 
+          ? state.trackPoints[pointIndex + 4]
+          : (nextNextPoint ? state.trackPoints[pointIndex + 3] : state.trackPoints[pointIndex + 2]);
         
         let legacyTangent: THREE.Vector3;
         
@@ -260,60 +315,39 @@ export const useRollerCoaster = create<RollerCoasterState>((set, get) => ({
           // Direction the legacy track is heading
           legacyTangent = pointAfterTarget.position.clone().sub(targetPos).normalize();
         } else {
-          // No point after, just use direction from loop exit to target
-          legacyTangent = targetPos.clone().sub(loopExit).normalize();
+          // No point after, just use direction from anchor to target
+          legacyTangent = targetPos.clone().sub(offsetLoopExit).normalize();
         }
+        legacyTangent.y = 0;
+        legacyTangent.normalize();
         
-        // Cubic Hermite interpolation between loopExit and targetPos
-        const distance = loopExit.distanceTo(targetPos);
-        const tangentScale = distance * 0.4; // Slightly reduced for smoother curve
+        // Second stage: offsetLoopExit to targetPos
+        const dist2 = offsetLoopExit.distanceTo(targetPos);
         
-        const hermite = (t: number): THREE.Vector3 => {
-          const t2 = t * t;
-          const t3 = t2 * t;
-          
-          const h00 = 2*t3 - 3*t2 + 1;
-          const h10 = t3 - 2*t2 + t;
-          const h01 = -2*t3 + 3*t2;
-          const h11 = t3 - t2;
-          
-          return new THREE.Vector3()
-            .addScaledVector(loopExit, h00)
-            .addScaledVector(exitTangent, h10 * tangentScale)
-            .addScaledVector(targetPos, h01)
-            .addScaledVector(legacyTangent, h11 * tangentScale);
-        };
-        
-        // Sample 3 points along the Hermite curve for smoother transition
+        // Sample 2 points along this Hermite curve
         transitionPoints.push({
           id: `point-${++pointCounter}`,
-          position: hermite(0.25),
+          position: hermite(0.33, offsetLoopExit, forward, targetPos, legacyTangent, dist2 * 0.5),
           tilt: 0
         });
         
         transitionPoints.push({
           id: `point-${++pointCounter}`,
-          position: hermite(0.5),
-          tilt: 0
-        });
-        
-        transitionPoints.push({
-          id: `point-${++pointCounter}`,
-          position: hermite(0.75),
+          position: hermite(0.66, offsetLoopExit, forward, targetPos, legacyTangent, dist2 * 0.5),
           tilt: 0
         });
       }
       
       // Combine: original up to BEFORE entry + approach + entry + loop + transitions + skip legacy points + rest
-      // If nextNextPoint exists, skip pointIndex+1 (nextPoint) to avoid clustering
-      const skipCount = nextNextPoint ? 2 : 1;
+      // Skip legacy points that are now replaced by our smooth transitions
+      const skipCount = nextNextNextPoint ? 3 : (nextNextPoint ? 2 : 1);
       const newTrackPoints = [
         ...state.trackPoints.slice(0, pointIndex), // All points before entry
         ...approachPoints,                          // Smooth approach to entry
         entryPoint,                                 // The entry point itself
         ...loopPoints,                              // The loop
         ...transitionPoints,                        // Smooth exit transition
-        ...state.trackPoints.slice(pointIndex + 1 + skipCount) // Skip entry and next legacy points
+        ...state.trackPoints.slice(pointIndex + 1 + skipCount) // Skip entry and replaced legacy points
       ];
       
       return { trackPoints: newTrackPoints };
