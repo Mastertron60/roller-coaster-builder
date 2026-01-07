@@ -161,6 +161,10 @@ export function RideCamera() {
     previousLookAt.current.lerp(targetLookAt, 0.25);
     
     camera.position.copy(previousCameraPos.current);
+    
+    // Set camera's up vector to match the transported up before lookAt
+    // This ensures the camera stays "upside down" when in loops
+    camera.up.copy(upVector);
     camera.lookAt(previousLookAt.current);
   });
   
