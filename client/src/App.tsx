@@ -39,14 +39,18 @@ function MusicController() {
   }, [setDaylightMusic, setNightMusic]);
   
   useEffect(() => {
+    if (!daylightMusic || !nightMusic) return;
+    
     if (isNightMode) {
-      stopDaylightMusic();
-      playNightMusic();
+      daylightMusic.pause();
+      nightMusic.currentTime = 0;
+      nightMusic.play().catch(() => {});
     } else {
-      stopNightMusic();
-      playDaylightMusic();
+      nightMusic.pause();
+      daylightMusic.currentTime = 0;
+      daylightMusic.play().catch(() => {});
     }
-  }, [isNightMode, playDaylightMusic, stopDaylightMusic, playNightMusic, stopNightMusic]);
+  }, [isNightMode, daylightMusic, nightMusic]);
   
   useEffect(() => {
     if (isMuted) {
